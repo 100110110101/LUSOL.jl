@@ -1,0 +1,13 @@
+name = "LUSOL"
+uuid = "7867729b-226c-4edd-ae0e-6319aed03222"
+authors = ["Thomas Leveringhaus"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
