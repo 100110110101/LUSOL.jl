@@ -19,3 +19,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+-----------------------------------------------------------------------------
+Third-Party Software Notice:
+This package wraps the LUSOL library, based on the Fortran implementation 
+by Michael Saunders (Stanford University) and refactored repositories by 
+Nick Henderson and Jacob Williams. Use of the underlying LUSOL core is 
+subject to the licensing terms of Stanford University.
