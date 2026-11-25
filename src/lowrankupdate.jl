@@ -14,10 +14,11 @@ function lowrankupdate!(F::LUSOLFactorization, c::AbstractVector{<:Real})
     for j in 1:n
         cj = c_vec[j]
         if cj != 0.0
-            # Reconstruct current column j using the up-to-date permutations F.p and F.q
+            # Reconstruct current column j of A from F.L and F.U: A[p, q] = L * U
             q_pos = findfirst(==(j), F.q)
             pinv = invperm(F.p)
             col_j = (F.L*Vector(F.U[:, q_pos]))[pinv]
+
             anew = col_j .+ cj .* c_vec
             singlecolumnupdate!(F, j, anew)
         end
@@ -25,6 +26,8 @@ function lowrankupdate!(F::LUSOLFactorization, c::AbstractVector{<:Real})
 
     return F
 end
+
+
 
 
 """
@@ -57,7 +60,6 @@ function lowrankupdate(F::SparseArrays.UMFPACK.UmfpackLU, C::AbstractVecOrMat{<:
     return lowrankupdate!(LUSOL.cnvrtUMFPACK2LUSOL(F; kwargs...), C)
 end
 
-function lowrankupdate(F::SparseArrays.CHOLMOD.Factor,
-    C::AbstractVecOrMat{<:Real}; kwargs...)
+function lowrankupdate(F::SparseArrays.CHOLMOD.Factor, C::AbstractVecOrMat{<:Real}; kwargs...)
     return lowrankupdate!(cnvrtCHOLMOD2LUSOL(F; kwargs...), C)
 end

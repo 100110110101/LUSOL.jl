@@ -36,6 +36,7 @@ include("extrLU.jl") # Compute sparse LU matrices
 
 # Public high-level interface
 include("lu.jl")
+include("mul.jl")
 include("singlecolumnupdate.jl")
 include("lowrankupdate.jl")
 

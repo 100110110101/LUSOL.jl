@@ -55,19 +55,22 @@ function extrLU(parm::LUSOLparm, objA::LUSOLobjA, res::LUSOLres)
         l1 = lena + 1
         for k in 1:numL0
             len = getindex(res.lenc, k)
-            l = l1
-            l1 -= len
-            ipiv = getindex(objA.indr, l1)
-            perm_col = getindex(pinv, ipiv)
-            for _ in 1:len
-                l -= 1
-                j = getindex(objA.indc, l)
-                perm_row = getindex(pinv, j)
-                push!(l_rows, perm_row)
-                push!(l_cols, perm_col)
-                push!(l_vals, -getindex(objA.a, l))
+            if len > 0
+                l = l1
+                l1 -= len
+                ipiv = getindex(objA.indr, l1)
+                perm_col = getindex(pinv, ipiv)
+                for _ in 1:len
+                    l -= 1
+                    j = getindex(objA.indc, l)
+                    perm_row = getindex(pinv, j)
+                    push!(l_rows, perm_row)
+                    push!(l_cols, perm_col)
+                    push!(l_vals, -getindex(objA.a, l))
+                end
             end
         end
+
         L = dropzeros!(sparse(l_rows, l_cols, l_vals, m, m))
         return L, U
     else

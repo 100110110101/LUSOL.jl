@@ -1,15 +1,24 @@
 name = "LUSOL"
 uuid = "7867729b-226c-4edd-ae0e-6319aed03222"
-version = "1.0.0-DEV"
+version = "0.1.0"
 authors = ["Thomas Leveringhaus"]
 
 [deps]
+KLU = "ef3ab10e-7fda-4108-b977-705223b18434"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
+[weakdeps]
+PureKLU = "0c0d3e7f-3a8b-4f7e-b6f1-9a4d2e7c1f01"
+
+[extensions]
+LUSOLKLUExt = "KLU"
+LUSOLPureKLUExt = "PureKLU"
+
 [compat]
+KLU = "0.6.1"
 LinearAlgebra = "1.12.0"
 Random = "1.11.0"
 SparseArrays = "1.12.0"
@@ -17,7 +26,10 @@ Test = "1.11.0"
 julia = "1.10"
 
 [extras]
+KLU = "ef3ab10e-7fda-4108-b977-705223b18434"
+PureKLU = "0c0d3e7f-3a8b-4f7e-b6f1-9a4d2e7c1f01"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "Random", "KLU", "PureKLU"]

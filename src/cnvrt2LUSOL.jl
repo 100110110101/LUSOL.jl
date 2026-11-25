@@ -1,41 +1,40 @@
 """
-    cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...) -> LUSOLFactorization
+    cnvrtKLU2LUSOL(F; kwargs...) -> LUSOLFactorization
 
-Internal helper that converts a standard library `UmfpackLU` object directly into a
-`LUSOLFactorization` in O(nnz(L) + nnz(U)) time without re-factorizing `A`.
+Converts a KLU factorization object (from `KLU.jl` or `PureKLU.jl`) into a
+`LUSOLFactorization`. Methods are provided by package extensions when `KLU` or `PureKLU` is loaded.
 """
-function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
-    m, n = size(F)
-    m == n || throw(DimensionMismatch("Expected square UmfpackLU factorization, got ($m × $n)."))
+function cnvrtKLU2LUSOL end
 
-    L_umf = F.L
-    U_umf = F.U
-    p = Vector{Int}(F.p)
-    q = Vector{Int}(F.q)
-    Rs = Vector{Float64}(F.Rs)
+"""
+    _pack_factors_to_lusol(L_unit, U_mat, p, q; kwargs...) -> LUSOLFactorization
 
-    # Absorb row scaling D = diag(Rs[p]) into L_tilde = D^-1 * L * D and U_tilde = D^-1 * U
-    d = Rs[p]
+Core internal builder that packs a unit-diagonal lower triangular matrix `L_unit` and an
+upper triangular matrix `U_mat` (matching `A[p, q] = L_unit * U_mat`) into `LUSOLFactorization`.
+"""
+function _pack_factors_to_lusol(L_unit::SparseMatrixCSC{Float64,Int},
+    U_mat::SparseMatrixCSC{Float64,Int},
+    p::Vector{Int}, q::Vector{Int}; kwargs...)
+    m, n = size(U_mat)
+    m == n || throw(DimensionMismatch("Expected square factorization, got ($m × $n)."))
 
     parm = crtLUSOLparm(; kwargs...)
-    nelem_est = nnz(L_umf) + nnz(U_umf)
+    nelem_est = nnz(L_unit) + nnz(U_mat)
     lena_factor = parm.lena_factor
     min_lena = getindex(parm.luparm, 13)
     lena = max(ceil(Int, lena_factor * nelem_est), 2 * max(m, n), min_lena)
 
-    # Allocate storage arrays for LUSOLobjA
     a = zeros(Float64, lena)
     indc = zeros(Int, lena)
     indr = zeros(Int, lena)
 
-    # Allocate index/pointer arrays for LUSOLres
     lenc = zeros(Int, n)
     lenr = zeros(Int, m)
     locc = zeros(Int, n)
     locr = zeros(Int, m)
 
-    # 1. Pack U_tilde row-by-row at the beginning of a (diagonal entry first per row)
-    Ut = sparse(transpose(U_umf))
+    # 1. Pack U_mat row-by-row at the beginning of a (diagonal entry first per row)
+    Ut = sparse(transpose(U_mat))
     Ut_colptr = SparseArrays.getcolptr(Ut)
     Ut_rowval = rowvals(Ut)
     Ut_nzval = nonzeros(Ut)
@@ -44,25 +43,24 @@ function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
     for k in 1:m
         orig_row = p[k]
         locr[orig_row] = ptr
-        inv_dk = 1.0 / d[k]
 
-        # Diagonal entry (k, k) first (required by LUSOL)
         diag_val = 0.0
         for idx in Ut_colptr[k]:(Ut_colptr[k+1]-1)
             if Ut_rowval[idx] == k
-                diag_val = Ut_nzval[idx] * inv_dk
+                diag_val = Ut_nzval[idx]
                 break
             end
         end
-        a[ptr] = diag_val
-        indr[ptr] = q[k]
-        ptr += 1
+        if diag_val != 0.0
+            a[ptr] = diag_val
+            indr[ptr] = q[k]
+            ptr += 1
+        end
 
-        # Strictly upper triangular entries of row k
         for idx in Ut_colptr[k]:(Ut_colptr[k+1]-1)
             c = Ut_rowval[idx]
             if c != k
-                val = Ut_nzval[idx] * inv_dk
+                val = Ut_nzval[idx]
                 if val != 0.0
                     a[ptr] = val
                     indr[ptr] = q[c]
@@ -74,20 +72,19 @@ function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
     end
     lenU = ptr - 1
 
-    # 2. Pack strictly lower triangular part of L_tilde backwards at the end of a
-    L_colptr = SparseArrays.getcolptr(L_umf)
-    L_rowval = rowvals(L_umf)
-    L_nzval = nonzeros(L_umf)
+    # 2. Pack strictly lower triangular part of L_unit backwards at the end of a
+    L_colptr = SparseArrays.getcolptr(L_unit)
+    L_rowval = rowvals(L_unit)
+    L_nzval = nonzeros(L_unit)
 
     l1 = lena + 1
     for k in 1:m
-        dk = d[k]
         orig_piv = p[k]
         len_col = 0
         for idx in L_colptr[k]:(L_colptr[k+1]-1)
             r = L_rowval[idx]
             if r > k
-                val = L_nzval[idx] * (dk / d[r])
+                val = L_nzval[idx]
                 if val != 0.0
                     l1 -= 1
                     a[l1] = -val
@@ -102,14 +99,21 @@ function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
     lenL0 = lena + 1 - l1
     nelem = lenU + lenL0
 
+    nz_lenc = filter(>(0), lenc)
+    numL0 = length(nz_lenc)
+    fill!(lenc, 0)
+    copyto!(lenc, 1, nz_lenc, 1, numL0)
+    nrank = count(>(0), lenr)
+
     # Set LUSOL internal bookkeeping counters in luparm
     setindex!(parm.luparm, 0, 10) # inform
-    setindex!(parm.luparm, m, 16) # nrank
-    setindex!(parm.luparm, m, 20) # numL0
+    setindex!(parm.luparm, nrank, 16) # nrank
+    setindex!(parm.luparm, numL0, 20) # numL0
     setindex!(parm.luparm, lenL0, 21) # lenL0
     setindex!(parm.luparm, lenU, 22) # lenU
     setindex!(parm.luparm, lenL0, 23) # lenL
     setindex!(parm.luparm, lenU, 24) # lrow
+    setindex!(parm.luparm, lenU, 25) # lcol
 
     # Assemble final LUSOLobjA, LUSOLres, and LUSOLFactorization objects
     objA = LUSOLobjA(m, n, nelem, lena, a, indc, indr)
@@ -121,141 +125,78 @@ function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
     copyto!(res.locc, locc)
     copyto!(res.locr, locr)
 
+    for k in 1:m
+        res.ipinv[p[k]] = k
+        res.iploc[k] = k
+    end
+    for k in 1:n
+        res.iqinv[q[k]] = k
+        res.iqloc[k] = k
+    end
 
     return LUSOLFactorization(parm, objA, res)
 end
+
+"""
+    cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...) -> LUSOLFactorization
+
+Converts a standard library `UmfpackLU` object into a `LUSOLFactorization` without re-factorizing `A`.
+"""
+function cnvrtUMFPACK2LUSOL(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
+    p = Vector{Int}(F.p)
+    q = Vector{Int}(F.q)
+    d = Vector{Float64}(F.Rs)[p]
+
+    # Absorb row scaling D = diag(Rs[p]): A[p, q] = (D^-1 * L * D) * (D^-1 * U)
+    L_unit = dropzeros!(spdiagm(0 => 1.0 ./ d) * F.L * spdiagm(0 => d))
+    U_mat = dropzeros!(spdiagm(0 => 1.0 ./ d) * F.U)
+
+    return _pack_factors_to_lusol(L_unit, U_mat, p, q; kwargs...)
+end
+
 """
     cnvrtCHOLMOD2LUSOL(F::SparseArrays.CHOLMOD.Factor; kwargs...) -> LUSOLFactorization
 
-Internal helper that converts a standard library `CHOLMOD.Factor` (`cholesky` or `ldlt`)
-directly into a `LUSOLFactorization` in O(nnz) time without re-factorizing `A`.
+Converts a standard library `CHOLMOD.Factor` (`cholesky` or `ldlt`) into a `LUSOLFactorization`.
 """
 function cnvrtCHOLMOD2LUSOL(F::SparseArrays.CHOLMOD.Factor; kwargs...)
-    m, n = size(F)
-    m == n || throw(DimensionMismatch("Expected square CHOLMOD factorization, got ($m × $n)."))
-
     p = Vector{Int}(F.p)
     q = copy(p)
 
-    # Check whether F is an LDL' factorization (supports F.LD) or LL' Cholesky (uses F.L)
-    is_ldlt = true
-    local LD::SparseMatrixCSC{Float64,Int}
+    local L_unit::SparseMatrixCSC{Float64,Int}
+    local U_mat::SparseMatrixCSC{Float64,Int}
+
     try
         LD = sparse(F.LD)
+        d = diag(LD)
+        L_unit = dropzeros!(LD - spdiagm(0 => d) + I)
+        U_mat = dropzeros!(spdiagm(0 => d) * sparse(transpose(L_unit)))
     catch
-        is_ldlt = false
-        LD = sparse(F.L)
+        L_chol = sparse(F.L)
+        d_sqrt = diag(L_chol)
+        L_unit = dropzeros!(L_chol * spdiagm(0 => 1.0 ./ d_sqrt))
+        U_mat = dropzeros!(spdiagm(0 => d_sqrt .^ 2) * sparse(transpose(L_unit)))
     end
 
-    LD_colptr = SparseArrays.getcolptr(LD)
-    LD_rowval = rowvals(LD)
-    LD_nzval = nonzeros(LD)
+    return _pack_factors_to_lusol(L_unit, U_mat, p, q; kwargs...)
+end
 
-    nelem_est = 2 * nnz(LD)
-    parm = crtLUSOLparm(; kwargs...)
-    lena_factor = parm.lena_factor
-    min_lena = getindex(parm.luparm, 13)
-    lena = max(ceil(Int, lena_factor * nelem_est), 2 * max(m, n), min_lena)
+"""
+    _pack_klu_to_lusol(L_klu, U_klu, F_off, p, q, Rs; invert_rs=true, kwargs...) -> LUSOLFactorization
 
-    # Allocate storage arrays for LUSOLobjA
-    a = zeros(Float64, lena)
-    indc = zeros(Int, lena)
-    indr = zeros(Int, lena)
+Shared packing logic used by both `LUSOLKLUExt` and `LUSOLPureKLUExt`.
+"""
+function _pack_klu_to_lusol(L_klu::SparseMatrixCSC{Float64,Int},
+    U_klu::SparseMatrixCSC{Float64,Int},
+    F_off::SparseMatrixCSC{Float64,Int},
+    p::Vector{Int}, q::Vector{Int},
+    Rs::Vector{Float64};
+    invert_rs::Bool=true, kwargs...)
+    d = invert_rs ? (1.0 ./ Rs) : Rs
+    U_total = nnz(F_off) == 0 ? U_klu : dropzeros!(U_klu + sparse(LowerTriangular(L_klu) \ Matrix(F_off)))
 
-    # Allocate index/pointer arrays for LUSOLres
-    lenc = zeros(Int, n)
-    lenr = zeros(Int, m)
-    locc = zeros(Int, n)
-    locr = zeros(Int, m)
+    L_unit = dropzeros!(spdiagm(0 => 1.0 ./ d) * L_klu * spdiagm(0 => d))
+    U_mat = dropzeros!(spdiagm(0 => 1.0 ./ d) * U_total)
 
-    # 1. Pack U_tilde row-by-row at the beginning of a
-    #    For LDL': U_tilde[k, k] = d_k, U_tilde[k, r] = d_k * L[r, k]
-    #    For LL':  L_tilde[r, k] = L[r, k] / L[k, k], d_k = L[k, k]^2 => U_tilde[k, r] = L[k, k] * L[r, k]
-    ptr = 1
-    for k in 1:m
-        orig_row = p[k]
-        locr[orig_row] = ptr
-
-        diag_raw = 0.0
-        for idx in LD_colptr[k]:(LD_colptr[k+1]-1)
-            if LD_rowval[idx] == k
-                diag_raw = LD_nzval[idx]
-                break
-            end
-        end
-
-        dk = is_ldlt ? diag_raw : diag_raw^2
-        a[ptr] = dk
-        indr[ptr] = q[k]
-        ptr += 1
-
-        scale_u = is_ldlt ? diag_raw : diag_raw
-        for idx in LD_colptr[k]:(LD_colptr[k+1]-1)
-            r = LD_rowval[idx]
-            if r > k
-                val = scale_u * LD_nzval[idx]
-                if val != 0.0
-                    a[ptr] = val
-                    indr[ptr] = q[r]
-                    ptr += 1
-                end
-            end
-        end
-        lenr[orig_row] = ptr - locr[orig_row]
-    end
-    lenU = ptr - 1
-
-    # 2. Pack strictly lower triangular part of unit-diagonal L_tilde backwards at the end of a
-    l1 = lena + 1
-    for k in 1:m
-        orig_piv = p[k]
-        diag_raw = 1.0
-        if !is_ldlt
-            for idx in LD_colptr[k]:(LD_colptr[k+1]-1)
-                if LD_rowval[idx] == k
-                    diag_raw = LD_nzval[idx]
-                    break
-                end
-            end
-        end
-
-        len_col = 0
-        for idx in LD_colptr[k]:(LD_colptr[k+1]-1)
-            r = LD_rowval[idx]
-            if r > k
-                val = is_ldlt ? LD_nzval[idx] : (LD_nzval[idx] / diag_raw)
-                if val != 0.0
-                    l1 -= 1
-                    a[l1] = -val
-                    indc[l1] = p[r]
-                    indr[l1] = orig_piv
-                    len_col += 1
-                end
-            end
-        end
-        lenc[k] = len_col
-    end
-    lenL0 = lena + 1 - l1
-    nelem = lenU + lenL0
-
-    # Set LUSOL internal bookkeeping counters in luparm
-    setindex!(parm.luparm, 0, 10) # inform
-    setindex!(parm.luparm, m, 16) # nrank
-    setindex!(parm.luparm, m, 20) # numL0
-    setindex!(parm.luparm, lenL0, 21) # lenL0
-    setindex!(parm.luparm, lenU, 22) # lenU
-    setindex!(parm.luparm, lenL0, 23) # lenL
-    setindex!(parm.luparm, lenU, 24) # lrow
-
-    # Assemble final LUSOLobjA, LUSOLres, and LUSOLFactorization objects
-    objA = LUSOLobjA(m, n, nelem, lena, a, indc, indr)
-    res = crtLUSOLres(objA)
-    copyto!(res.p, p)
-    copyto!(res.q, q)
-    copyto!(res.lenc, lenc)
-    copyto!(res.lenr, lenr)
-    copyto!(res.locc, locc)
-    copyto!(res.locr, locr)
-
-    return LUSOLFactorization(parm, objA, res)
+    return _pack_factors_to_lusol(L_unit, U_mat, p, q; kwargs...)
 end

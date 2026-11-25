@@ -1,8 +1,12 @@
+# ==============================================================================
+# 1. Struct Definition & Lazy Extraction Helper
+# ==============================================================================
+
 """
     LUSOLFactorization <: Factorization{Float64}
 
 Factorization object returned by `LUSOL.lu(A)`. Supports property access (`F.L`, `F.U`,
-`F.p`, `F.q`, `F.Rs`), iteration/destructuring, `issuccess(F)`, and linear solves via `F \\ b`.
+`F.p`, `F.q`, `F.Rs`), iteration/destructuring, `issuccess(F)`, `ldiv!`, and `F \\ b`.
 """
 mutable struct LUSOLFactorization <: Factorization{Float64}
     parm::LUSOLparm
@@ -24,6 +28,10 @@ function _ensure_extracted!(F::LUSOLFactorization)
     end
     return getfield(F, :L_cache), getfield(F, :U_cache)
 end
+
+# ==============================================================================
+# 2. Properties & Destructuring (`L, U, p, q, Rs = F`)
+# ==============================================================================
 
 function Base.getproperty(F::LUSOLFactorization, s::Symbol)
     if s === :L
@@ -49,7 +57,6 @@ end
 Base.propertynames(::LUSOLFactorization, private::Bool=false) =
     private ? (:L, :U, :p, :q, :Rs, :parm, :objA, :res, :L_cache, :U_cache) : (:L, :U, :p, :q, :Rs)
 
-# Support destructuring: L, U, p, q, Rs = F
 function Base.iterate(F::LUSOLFactorization, state::Int=1)
     state == 1 && return (F.L, 2)
     state == 2 && return (F.U, 3)
@@ -59,29 +66,74 @@ function Base.iterate(F::LUSOLFactorization, state::Int=1)
     return nothing
 end
 
-Base.size(F::LUSOLFactorization) = (getfield(F, :objA).m, getfield(F, :objA).n)
-Base.size(F::LUSOLFactorization, dim::Integer) = size(F)[dim]
+# ==============================================================================
+# 3. Base Interface (`size`, `show`, `\`)
+# ==============================================================================
 
-LinearAlgebra.issuccess(F::LUSOLFactorization) = getfield(F, :res).inform == 0
+Base.size(F::LUSOLFactorization) = (getfield(F, :objA).m, getfield(F, :objA).n)
+
+function Base.size(F::LUSOLFactorization, dim::Integer)
+    dim == 1 && return getfield(F, :objA).m
+    dim == 2 && return getfield(F, :objA).n
+    dim > 2 && return 1
+    throw(BoundsError(size(F), dim))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", F::LUSOLFactorization)
+    m, n = size(F)
+    print(io, "LUSOLFactorization ($m×$n, inform = $(getfield(F, :res).inform))")
+end
 
 function Base.:\(F::LUSOLFactorization, b::AbstractVector{<:Real})
-    return lu6sol(getfield(F, :parm), getfield(F, :objA), getfield(F, :res), Vector{Float64}(b); mode=5)
+    return LinearAlgebra.ldiv!(F, Vector{Float64}(b))
 end
 
 function Base.:\(F::LUSOLFactorization, B::AbstractMatrix{<:Real})
     m, n = size(F)
     size(B, 1) == m || throw(DimensionMismatch("RHS has $(size(B, 1)) rows, expected $m."))
     X = Matrix{Float64}(undef, n, size(B, 2))
+    return LinearAlgebra.ldiv!(X, F, B)
+end
+
+# ==============================================================================
+# 4. LinearAlgebra Interface (`issuccess`, `ldiv!`, `LinearAlgebra.lu`)
+# ==============================================================================
+
+LinearAlgebra.issuccess(F::LUSOLFactorization) = getfield(F, :res).inform == 0
+
+function LinearAlgebra.ldiv!(F::LUSOLFactorization, b::Vector{Float64})
+    m, n = size(F)
+    m == n || throw(DimensionMismatch("In-place ldiv! requires a square matrix, got ($m×$n)."))
+    length(b) == m || throw(DimensionMismatch("RHS has length $(length(b)), expected $m."))
+    lu6sol!(getfield(F, :parm), getfield(F, :objA), getfield(F, :res), copy(b), b; mode=5)
+    return b
+end
+
+
+function LinearAlgebra.ldiv!(x::AbstractVector{Float64}, F::LUSOLFactorization, b::AbstractVector{<:Real})
+    m, n = size(F)
+    length(b) == m || throw(DimensionMismatch("RHS has length $(length(b)), expected $m."))
+    length(x) == n || throw(DimensionMismatch("Destination has length $(length(x)), expected $n."))
+    sol = lu6sol(getfield(F, :parm), getfield(F, :objA), getfield(F, :res), Vector{Float64}(b); mode=5)
+    return copyto!(x, sol)
+end
+
+function LinearAlgebra.ldiv!(X::AbstractMatrix{Float64}, F::LUSOLFactorization, B::AbstractMatrix{<:Real})
+    m, n = size(F)
+    size(B, 1) == m || throw(DimensionMismatch("RHS has $(size(B, 1)) rows, expected $m."))
+    size(X) == (n, size(B, 2)) || throw(DimensionMismatch("Destination has size $(size(X)), expected ($n, $(size(B, 2)))."))
     for j in axes(B, 2)
-        X[:, j] .= lu6sol(getfield(F, :parm), getfield(F, :objA), getfield(F, :res), Vector{Float64}(@view B[:, j]); mode=5)
+        sol = lu6sol(getfield(F, :parm), getfield(F, :objA), getfield(F, :res), Vector{Float64}(@view B[:, j]); mode=5)
+        @views copyto!(X[:, j], sol)
     end
     return X
 end
 
-function Base.show(io::IO, mime::MIME"text/plain", F::LUSOLFactorization)
-    m, n = size(F)
-    print(io, "LUSOLFactorization ($m×$n, inform = $(getfield(F, :res).inform))")
-end
+LinearAlgebra.lu(F::LUSOLFactorization) = lu(F)
+
+# ==============================================================================
+# 5. LUSOL.lu Constructors & Factorization Converters
+# ==============================================================================
 
 """
     lu(A::SparseMatrixCSC{Float64, Int}; check::Bool = true, kwargs...) -> LUSOLFactorization
@@ -98,8 +150,39 @@ function lu(A::SparseMatrixCSC{Float64,Int}; check::Bool=true, kwargs...)
     return F
 end
 
-# Fallback for general matrices (e.g. SparseMatrixCSC{Int, Int} or dense Matrix)
 function lu(A::AbstractMatrix; check::Bool=true, kwargs...)
     return lu(SparseMatrixCSC{Float64,Int}(A); check=check, kwargs...)
 end
 
+"""
+    lu(F::LUSOLFactorization) -> LUSOLFactorization
+
+Returns a deep copy of an existing `LUSOLFactorization` (consistent with `LinearAlgebra.lu(F)`).
+"""
+function lu(F::LUSOLFactorization)
+    return LUSOLFactorization(
+        deepcopy(getfield(F, :parm)),
+        deepcopy(getfield(F, :objA)),
+        deepcopy(getfield(F, :res))
+    )
+end
+
+"""
+    lu(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...) -> LUSOLFactorization
+
+Converts a standard library `UmfpackLU` factorization into a `LUSOLFactorization`
+without re-factorizing `A`.
+"""
+function lu(F::SparseArrays.UMFPACK.UmfpackLU; kwargs...)
+    return cnvrtUMFPACK2LUSOL(F; kwargs...)
+end
+
+"""
+    lu(F::SparseArrays.CHOLMOD.Factor; kwargs...) -> LUSOLFactorization
+
+Converts a standard library `CHOLMOD.Factor` (`cholesky` or `ldlt`) into a
+`LUSOLFactorization` without re-factorizing `A`.
+"""
+function lu(F::SparseArrays.CHOLMOD.Factor; kwargs...)
+    return cnvrtCHOLMOD2LUSOL(F; kwargs...)
+end

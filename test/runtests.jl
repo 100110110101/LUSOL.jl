@@ -237,5 +237,123 @@ using Random
         @test F_lusol_ldlt \ b ≈ A_spd \ b
         @test F_lusol_ldlt.L * F_lusol_ldlt.U ≈ (F_lusol_ldlt.Rs .* A_spd)[F_lusol_ldlt.p, F_lusol_ldlt.q]
     end
+    return nothing
+end
 
+@testset "Extension (LUSOLKLUExt - KLU.jl)" begin
+    using KLU
+    Random.seed!(201)
+
+    # Create a sparse matrix with multiple BTF blocks (tridiagonal + off-diagonal coupling)
+    A = sprand(25, 25, 0.15) + 5I
+    b = rand(25)
+
+    F_klu = KLU.klu(A)
+    F_lusol = LUSOL.cnvrtKLU2LUSOL(F_klu)
+
+    @test F_lusol isa LUSOL.LUSOLFactorization
+    @test issuccess(F_lusol)
+    @test F_lusol \ b ≈ A \ b
+    @test F_lusol.L * F_lusol.U ≈ (F_lusol.Rs .* A)[F_lusol.p, F_lusol.q]
+
+    # Test direct singlecolumnupdate & lowrankupdate on KLUFactorization
+    jrep = 6
+    anew = rand(25)
+    A_col = Matrix(A)
+    A_col[:, jrep] .= anew
+    F_col = LUSOL.singlecolumnupdate(F_klu, jrep, anew)
+    @test F_col \ b ≈ A_col \ b
+
+    c = sprand(25, 0.25)
+    A_lr = Matrix(A) + Vector(c) * Vector(c)'
+    F_lr = LUSOL.lowrankupdate(F_klu, c)
+    @test F_lr \ b ≈ A_lr \ b
+end
+
+@testset "Extension (LUSOLPureKLUExt - PureKLU.jl)" begin
+    using PureKLU
+    Random.seed!(202)
+
+    A = sprand(25, 25, 0.15) + 5I
+    b = rand(25)
+
+    F_pklu = PureKLU.klu(A)
+    F_lusol = LUSOL.cnvrtKLU2LUSOL(F_pklu)
+
+    @test F_lusol isa LUSOL.LUSOLFactorization
+    @test issuccess(F_lusol)
+    @test F_lusol \ b ≈ A \ b
+    @test F_lusol.L * F_lusol.U ≈ (F_lusol.Rs .* A)[F_lusol.p, F_lusol.q]
+
+    # Test direct singlecolumnupdate & lowrankupdate on PureKLU.KLUFactorization
+    jrep = 6
+    anew = rand(25)
+    A_col = Matrix(A)
+    A_col[:, jrep] .= anew
+    F_col = LUSOL.singlecolumnupdate(F_pklu, jrep, anew)
+    @test F_col \ b ≈ A_col \ b
+
+    c = sprand(25, 0.25)
+    A_lr = Matrix(A) + Vector(c) * Vector(c)'
+    F_lr = LUSOL.lowrankupdate(F_pklu, c)
+    @test F_lr \ b ≈ A_lr \ b
+end
+
+@testset "LinearAlgebra ldiv! & LUSOL.lu(F) on all factorization types" begin
+    Random.seed!(404)
+    M = sprand(25, 25, 0.2)
+    A = M' * M + 5I # SPD so cholesky/ldlt also work on the same matrix
+    b = rand(25)
+    B = rand(25, 3)
+
+    F_lusol = LUSOL.lu(A)
+
+    # 1. LinearAlgebra.ldiv! interfaces
+    b_copy = copy(b)
+    @test LinearAlgebra.ldiv!(F_lusol, b_copy) === b_copy
+    @test b_copy ≈ A \ b
+
+    x_dest = zeros(25)
+    @test LinearAlgebra.ldiv!(x_dest, F_lusol, b) === x_dest
+    @test x_dest ≈ A \ b
+
+    X_dest = zeros(25, 3)
+    @test LinearAlgebra.ldiv!(X_dest, F_lusol, B) === X_dest
+    @test X_dest ≈ A \ B
+
+    # 2. LUSOL.lu(F) & LinearAlgebra.lu(F) on LUSOLFactorization (deep copy check)
+    F_copy = LUSOL.lu(F_lusol)
+    @test F_copy isa LUSOL.LUSOLFactorization
+    @test F_copy !== F_lusol
+    @test F_copy \ b ≈ A \ b
+
+    F_la_copy = LinearAlgebra.lu(F_lusol)
+    @test F_la_copy isa LUSOL.LUSOLFactorization
+    @test F_la_copy \ b ≈ A \ b
+
+    # 3. LUSOL.lu(F) on stdlib UmfpackLU and CHOLMOD.Factor
+    F_umf = LinearAlgebra.lu(A)
+    F_from_umf = LUSOL.lu(F_umf)
+    @test F_from_umf isa LUSOL.LUSOLFactorization
+    @test F_from_umf \ b ≈ A \ b
+
+    F_chol = LinearAlgebra.cholesky(A)
+    F_from_chol = LUSOL.lu(F_chol)
+    @test F_from_chol isa LUSOL.LUSOLFactorization
+    @test F_from_chol \ b ≈ A \ b
+
+    F_ldlt = LinearAlgebra.ldlt(A)
+    F_from_ldlt = LUSOL.lu(F_ldlt)
+    @test F_from_ldlt isa LUSOL.LUSOLFactorization
+    @test F_from_ldlt \ b ≈ A \ b
+
+    # 4. LUSOL.lu(F) on KLU.jl & PureKLU.jl extensions
+    using KLU, PureKLU
+    F_from_klu = LUSOL.lu(KLU.klu(A))
+    @test F_from_klu isa LUSOL.LUSOLFactorization
+    @test F_from_klu \ b ≈ A \ b
+
+    F_from_pklu = LUSOL.lu(PureKLU.klu(A))
+    @test F_from_pklu isa LUSOL.LUSOLFactorization
+    @test F_from_pklu \ b ≈ A \ b
 end
