@@ -1,6 +1,6 @@
 name = "LUSOL"
 uuid = "7867729b-226c-4edd-ae0e-6319aed03222"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Thomas Leveringhaus"]
 
 [deps]
@@ -23,7 +23,7 @@ KLU = "0.6.1"
 LUSOL_jll = "1.0.1"
 LinearAlgebra = "1.12.0"
 Random = "1.11.0"
-SparseArrays = "1.12.0"
+SparseArrays = "1.10.0"
 Test = "1.11.0"
 julia = "1.10"
 
