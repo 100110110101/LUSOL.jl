@@ -4,7 +4,7 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://100110110101.github.io/LUSOL.jl/dev/)
 [![Build Status](https://github.com/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/actions/workflows/CI.yml?query=branch%3Amaster)
 
-A Julia wrapper for the Fortran 90 sparse LU factorization and rank-1 / column update library [**LUSOL Version by Jacob Williams**](https://github.com/jacobwilliams/lusol/) (originally developed by Michael Saunders, Philip Gill, and Walter Murray at Stanford SOL [**LUSOL early versions**](https://web.stanford.edu/group/SOL/software/lusol/), powered cross-platform by [**LUSOL_jll**](https://github.com/JuliaBinaryWrappers/LUSOL_jll.jl).
+A Julia wrapper for the Fortran 90 sparse LU factorization and rank-1 / column update library [**LUSOL latest Version by Jacob Williams**](https://github.com/jacobwilliams/lusol/) (originally developed by Michael Saunders, Philip Gill, and Walter Murray at Stanford SOL [**LUSOL early versions**](https://web.stanford.edu/group/SOL/software/lusol/)), powered cross-platform by [**LUSOL_jll**](https://github.com/JuliaBinaryWrappers/LUSOL_jll.jl).
 
 `LUSOL.jl` provides a familiar `LinearAlgebra`-compatible interface (`F.L`, `F.U`, `F.p`, `F.q`, `F.Rs`, `F \ b`, `ldiv!`, `mul!`) alongside fast in-place and out-of-place factor updates (`singlecolumnupdate!`, `lowrankupdate!`) and $\mathcal{O}(\text{nnz})$ zero-refactorization converters for existing `UMFPACK`, `CHOLMOD`, `KLU.jl`, and `PureKLU.jl` factorizations.
 
