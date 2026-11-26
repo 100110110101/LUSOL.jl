@@ -4,3 +4,6 @@ LUSOL = "7867729b-226c-4edd-ae0e-6319aed03222"
 
 [sources]
 LUSOL = {path = "C:\\Repositories\\LUSOL.jl"}
+
+[compat]
+Documenter = "1.20.0"
