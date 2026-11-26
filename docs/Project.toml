@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 LUSOL = "7867729b-226c-4edd-ae0e-6319aed03222"
+
+[sources]
+LUSOL = {path = "C:\\Repositories\\LUSOL.jl"}

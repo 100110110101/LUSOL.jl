@@ -1,10 +1,11 @@
 name = "LUSOL"
 uuid = "7867729b-226c-4edd-ae0e-6319aed03222"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Thomas Leveringhaus"]
 
 [deps]
 KLU = "ef3ab10e-7fda-4108-b977-705223b18434"
+LUSOL_jll = "309b23e2-78ff-51d6-ab1a-e40086895d07"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
@@ -19,6 +20,7 @@ LUSOLPureKLUExt = "PureKLU"
 
 [compat]
 KLU = "0.6.1"
+LUSOL_jll = "1.0.1"
 LinearAlgebra = "1.12.0"
 Random = "1.11.0"
 SparseArrays = "1.12.0"

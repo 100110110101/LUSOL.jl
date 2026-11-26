@@ -1,7 +1,6 @@
 module LUSOL
 
-# using LUSOL_jll # Später wieder aktivieren, sobald Yggdrasil gemerged hat
-const liblusol = joinpath(@__DIR__, "..", "bin", "liblusol.dll")
+using LUSOL_jll
 using SparseArrays
 using LinearAlgebra
 
